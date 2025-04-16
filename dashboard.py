@@ -30,13 +30,13 @@ def main():
 
     latest_data = mongo_data[-1]
     st.subheader("Data Terkini")
-    
+
     last_updated = latest_data['timestamp']
     formatted_time = last_updated.strftime("%d %B %Y, %H:%M")
     st.caption(f"Data terakhir diperbarui pada **{formatted_time}**")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Ketinggian Air (cm)", f"{latest_data['distance']:.2f}")
+        st.metric("Jarak sensor terhadap permukaan air (cm)", f"{latest_data['distance']:.2f}")
     with col2:
         rain_status = "Hujan" if latest_data["raindrop"] == 1 else "Tidak Hujan"
         st.metric("Status Hujan", rain_status)

@@ -74,8 +74,14 @@ def main():
 
     if not st.session_state.has_user_asked:
         st.markdown("💡 **Coba tanyakan ini:**")
-        cols = st.columns(3)
-        suggestions = ["Apakah sedang hujan?", "Berapa ketinggian air?", "Berapa suhu saat ini?"]
+        cols = st.columns(5)
+        suggestions = [
+            "Apakah tren suhu meningkat?",
+            "Apakah kelembaban akhir-akhir ini stabil?",
+            "Apakah terjadi peningkatan ketinggian air?",
+            "Apakah kemungkinan terjadi banjir?",
+            "Bagaimana kondisi sungai akhir-akhir ini?"
+        ]
         for i, suggestion in enumerate(suggestions):
             with cols[i]:
                 if st.button(suggestion, key=f"suggestion_{i}"):
