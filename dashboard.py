@@ -46,7 +46,7 @@ def main():
     with col4:
         st.metric("Kelembaban (%)", f"{latest_data['humidity']:.2f}")
     with col5:
-        warning_status = "Tidak Banjir" if latest_data["warning"] == 1 else "Banjir"
+        warning_status = "Tidak Banjir" if latest_data["warning"] == 0 else "Banjir"
         st.metric("Peringatan", warning_status)
 
     with col6:
