@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from utils import get_mongo_data
 
 def main():
-    st.title("Dashboard Kesehatan Sungai")
+    st.title("River Health Monitoring")
 
     st.sidebar.header("Pengaturan")
     use_date_range = st.sidebar.toggle("Filter Rentang Tanggal", value=False)
@@ -22,7 +22,16 @@ def main():
     else:
         start_date, end_date = default_start_date, default_end_date
 
-    mongo_data = get_mongo_data(start_date, end_date)
+    # Tambahkan tombol refresh
+    if st.button("Refresh Data"):
+        # Memanggil kembali fungsi untuk mendapatkan data terbaru
+        mongo_data = get_mongo_data(start_date, end_date)
+        st.session_state.mongo_data = mongo_data  # Simpan data di session state
+    else:
+        # Gunakan data yang sudah ada di session state jika tombol belum ditekan
+        if 'mongo_data' not in st.session_state:
+            st.session_state.mongo_data = get_mongo_data(start_date, end_date)
+        mongo_data = st.session_state.mongo_data
 
     if not mongo_data:
         st.warning("Data pada rentang ini tidak tersedia.")
