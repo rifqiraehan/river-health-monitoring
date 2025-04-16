@@ -18,7 +18,7 @@ def get_answer(prompt, data_list):
         rain_text = "hujan" if data["raindrop"] == 1 else "tidak hujan"
         warning_text = "Ada peringatan banjir" if data.get("warning", 0) == 1 else "Tidak ada peringatan banjir"
         context += (
-            f"- {data['timestamp']}: Ketinggian air {data['distance']:.2f} cm, "
+            f"- {data['timestamp']}: Jarak sensor terhadap permukaan air  {data['distance']:.2f} cm, "
             f"{rain_text}, Suhu {data['temperature']}°C, Kelembaban {data['humidity']}%, "
             f"{warning_text}\n"
         )
