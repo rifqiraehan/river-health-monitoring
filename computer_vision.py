@@ -1,11 +1,9 @@
-# File: pages/_computer_vision.py
 import streamlit as st
 from PIL import Image
 import io
 import base64
 import google.generativeai as genai
 
-# Konfigurasi API Gemini
 api_key = st.secrets["GOOGLE_API_KEY"]
 genai.configure(api_key=api_key)
 model = genai.GenerativeModel('gemini-2.0-flash')
@@ -34,11 +32,9 @@ def get_object_count(image_bytes):
     try:
         image = Image.open(io.BytesIO(image_bytes))
 
-        # Validasi apakah gambar menunjukkan permukaan air
         if not is_water_surface(image):
-            return "Gambar tidak valid: Harap unggah gambar yang menunjukkan permukaan air sungai."
+            return "Gambar tidak valid! Harap unggah gambar yang menunjukkan permukaan air sungai."
 
-        # Jika valid, lanjutkan ke deteksi sampah
         prompt = "Analisis gambar sungai ini dan hitung jumlah sampah yang terdeteksi (seperti botol plastik, kantong plastik, atau benda buatan manusia lainnya). Abaikan benda alami seperti daun, kayu, atau batu. Outputkan hanya angka numerik total sampah yang terdeteksi (contoh: 5), tanpa teks tambahan. Jika tidak ada sampah yang terdeteksi, outputkan 0."
         response = model.generate_content([prompt, image])
         response.resolve()

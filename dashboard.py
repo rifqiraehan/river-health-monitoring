@@ -1,4 +1,3 @@
-# File: pages/dashboard.py
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -8,11 +7,9 @@ from utils import get_mongo_data
 def main():
     st.title("Dashboard Kesehatan Sungai")
 
-    # Filter tanggal di sidebar
     st.sidebar.header("Pengaturan")
     use_date_range = st.sidebar.toggle("Filter Rentang Tanggal", value=False)
 
-    # Rentang tanggal default (7 hari terakhir) jika tidak ada filter
     default_start_date = datetime.now() - timedelta(days=7)
     default_end_date = datetime.now()
 
@@ -25,17 +22,18 @@ def main():
     else:
         start_date, end_date = default_start_date, default_end_date
 
-    # Ambil data dari MongoDB berdasarkan rentang tanggal
     mongo_data = get_mongo_data(start_date, end_date)
 
-    # Cek ketersediaan data
     if not mongo_data:
-        st.warning("Data tidak tersedia.")
+        st.warning("Data pada rentang ini tidak tersedia.")
         return
 
-    # Tampilkan data terbaru
     latest_data = mongo_data[-1]
     st.subheader("Data Terkini")
+    # Tampilkan waktu update terakhir
+    last_updated = latest_data['timestamp']
+    formatted_time = last_updated.strftime("%d %B %Y, %H:%M")
+    st.caption(f"Data terakhir diperbarui pada **{formatted_time}**")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Ketinggian Air (cm)", f"{latest_data['distance']:.2f}")
@@ -48,46 +46,42 @@ def main():
     with col4:
         st.metric("Kelembaban (%)", f"{latest_data['humidity']:.2f}")
     with col5:
-        st.metric("Peringatan", latest_data["warning"])
+        warning_status = "Tidak Banjir" if latest_data["warning"] == 1 else "Banjir"
+        st.metric("Peringatan", warning_status)
+
     with col6:
         st.write("")
 
-    # Tampilkan grafik jika ada cukup data
     st.subheader("Grafik Data Sensor")
     if len(mongo_data) > 1:
         df = pd.DataFrame(mongo_data)
 
         if '_id' in df.columns:
             df = df.drop(columns=['_id'])
-            
+
         df['timestamp'] = pd.to_datetime(df['timestamp'])
 
-        # Grafik suhu
         temp_chart = alt.Chart(df).mark_line(color='red').encode(
             x='timestamp:T',
             y=alt.Y('temperature:Q', title='Suhu (°C)', scale=alt.Scale(domain=[min(df['temperature'])-5, max(df['temperature'])+5])),
             tooltip=['timestamp', 'temperature']
         ).properties(width=700, height=300)
 
-        # Grafik kelembaban
         hum_chart = alt.Chart(df).mark_line(color='blue').encode(
             x='timestamp:T',
             y=alt.Y('humidity:Q', title='Kelembaban (%)', scale=alt.Scale(domain=[min(df['humidity'])-10, max(df['humidity'])+10])),
             tooltip=['timestamp', 'humidity']
         ).properties(width=700, height=300)
 
-        # Grafik ketinggian air
         distance_chart = alt.Chart(df).mark_line(color='green').encode(
             x='timestamp:T',
             y=alt.Y('distance:Q', title='Ketinggian Air (cm)', scale=alt.Scale(domain=[min(df['distance'])-5, max(df['distance'])+5])),
             tooltip=['timestamp', 'distance']
         ).properties(width=700, height=300)
 
-        # Gabungkan grafik
         combined_chart = alt.layer(temp_chart, hum_chart).resolve_scale(y='independent')
         st.altair_chart(combined_chart, use_container_width=True)
 
-        # Tampilkan grafik ketinggian air secara terpisah
         st.altair_chart(distance_chart, use_container_width=True)
     else:
         st.info("Tidak ada data yang cukup untuk grafik. Pilih rentang tanggal yang lebih luas.")
