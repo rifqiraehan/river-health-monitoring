@@ -30,7 +30,7 @@ def main():
 
     latest_data = mongo_data[-1]
     st.subheader("Data Terkini")
-    # Tampilkan waktu update terakhir
+    
     last_updated = latest_data['timestamp']
     formatted_time = last_updated.strftime("%d %B %Y, %H:%M")
     st.caption(f"Data terakhir diperbarui pada **{formatted_time}**")
