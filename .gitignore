@@ -1,0 +1,7 @@
+__pycache__
+_to_cv
+_to_farrel
+_to_mongodb
+.streamlit/secrets.toml
+note.txt
+/venv
