@@ -11,3 +11,4 @@ bcrypt
 streamlit_geolocation
 geopy
 faker
+opencv-python
