@@ -1,60 +1,85 @@
 import streamlit as st
-from PIL import Image
-import io
-import base64
-import google.generativeai as genai
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
+import av
+import cv2
+import torch
+import numpy as np
+import urllib.request
+import threading
+import time
+import requests
+import streamlit as st
+import cv2
+import torch
+import numpy as np
+import requests
+import time
 
-api_key = st.secrets["GOOGLE_API_KEY"]
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-2.0-flash')
+# Load YOLOv5 model once
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+model.conf = 0.4
 
-def get_image_base64(image):
-    buffered = io.BytesIO()
-    image.save(buffered, format="JPEG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return img_str
-
-def is_water_surface(image):
-    """
-    Memverifikasi apakah gambar menunjukkan permukaan air (sungai, danau, kolam).
-    Mengembalikan True jika valid, False jika tidak.
-    """
+# Function to capture a single image from ESP32-CAM
+def capture_image_from_esp32(url):
     try:
-        prompt = "Periksa apakah gambar ini menunjukkan permukaan air seperti sungai, danau, atau kolam. Jawab hanya dengan 'Ya' jika ya, atau 'Tidak' jika tidak."
-        response = model.generate_content([prompt, image])
-        response.resolve()
-        return response.text.strip().lower() == "ya"
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            # Convert the image to numpy array
+            img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            return img
+        else:
+            st.error(f"⚠️ Gagal mengakses gambar dari ESP32-CAM. Status: {response.status_code}")
+            return None
     except Exception as e:
-        st.error(f"Terjadi kesalahan saat memverifikasi gambar: {e}")
-        return False
+        st.error(f"⚠️ Terjadi kesalahan saat mengambil gambar: {e}")
+        return None
 
-def get_object_count(image_bytes):
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
+# Function to stream from ESP32-CAM with frame updates
+def stream_esp32(url, frame_window):
+    while True:
+        frame = capture_image_from_esp32(url)
+        if frame is None:
+            st.warning("⚠️ Tidak bisa mendapatkan gambar dari ESP32-CAM.")
+            break
 
-        if not is_water_surface(image):
-            return "Gambar tidak valid! Harap unggah gambar yang menunjukkan permukaan air sungai."
+        # YOLOv5 object detection
+        results = model(frame)
+        detections = results.xyxy[0]
 
-        prompt = "Analisis gambar sungai ini dan hitung jumlah sampah yang terdeteksi (seperti botol plastik, kantong plastik, atau benda buatan manusia lainnya). Abaikan benda alami seperti daun, kayu, atau batu. Outputkan hanya angka numerik total sampah yang terdeteksi (contoh: 5), tanpa teks tambahan. Jika tidak ada sampah yang terdeteksi, outputkan 0."
-        response = model.generate_content([prompt, image])
-        response.resolve()
-        numeric_response = ''.join(filter(str.isdigit, response.text))
-        return numeric_response if numeric_response else "Tidak dapat mendeteksi jumlah sampah."
-    except Exception as e:
-        return f"Terjadi kesalahan: {e}"
+        # Draw bounding boxes and labels
+        for *box, conf, cls in detections:
+            x1, y1, x2, y2 = map(int, box)
+            label = f"{model.names[int(cls)]} {conf:.2f}"
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, label, (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
+        # Display object count
+        cv2.putText(frame, f"Jumlah objek: {len(detections)}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+
+        # Update the image display in Streamlit
+        frame_window.image(frame, channels="BGR")
+        time.sleep(0.1)  # Delay to prevent too fast looping
+
+# Main function for Streamlit app
 def main():
-    st.title("Deteksi Sampah di Sungai")
-    uploaded_file = st.file_uploader("Unggah gambar...", type=["jpg", "jpeg", "png"])
-    if uploaded_file is not None:
-        image_bytes = uploaded_file.read()
-        image = Image.open(io.BytesIO(image_bytes))
-        st.image(image, caption="Gambar yang diunggah.", use_container_width=True)
-        if st.button("Deteksi Jumlah Sampah"):
-            with st.spinner("Menganalisis gambar..."):
-                result = get_object_count(image_bytes)
-                st.subheader("Hasil Deteksi:")
-                st.write(f"**{result}**")
+    st.title("🚮 Deteksi Sampah di Sungai")
+
+    with st.sidebar.expander("🔧 Pengaturan Kamera"):
+        CAM_SOURCE = st.radio("🎥 Pilih Sumber Kamera", ("Kamera Laptop/USB", "ESP32-CAM"))
+        esp32_url = st.text_input("🌐 URL Stream ESP32-CAM", "http://192.168.75.206/capture")
+
+    if CAM_SOURCE == "Kamera Laptop/USB":
+        # Use the webrtc_streamer for webcam/USB camera
+        st.warning("Fitur streaming dari Kamera Laptop/USB belum diimplementasikan.")
+    else:
+        st.warning("ESP32-CAM aktif. Menyambungkan ke stream...")
+        FRAME_WINDOW = st.empty()
+
+        # Directly stream ESP32-CAM in the main thread to prevent threading issues
+        stream_esp32(esp32_url, FRAME_WINDOW)
 
 if __name__ == "__main__":
     main()
