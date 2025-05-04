@@ -2,22 +2,28 @@ import streamlit as st
 import dashboard as dashboard
 import computer_vision as cv
 import chat as chat
+import report as report
 
 st.set_page_config(page_title="River Health Monitoring", layout="wide")
 
 st.sidebar.title("Navigasi")
-page = st.sidebar.selectbox("Pilih Menu", ["Dashboard", "Computer Vision", "Chatbot"])
+page_options = ["Dashboard", "Deteksi Sampah", "Chat AI", "Laporan Warga"]
+page = st.sidebar.selectbox("Pilih Menu", page_options)
 
 if page == "Dashboard":
-    st.sidebar.markdown("**Deskripsi:** Menampilkan data sensor terkini dan grafik tren ketinggian air, suhu, serta kelembaban.")
-elif page == "Computer Vision":
-    st.sidebar.markdown("**Deskripsi:** Mendeteksi sampah di sungai menggunakan gambar yang diunggah.")
-elif page == "Chatbot":
-    st.sidebar.markdown("**Deskripsi:** Berinteraksi dengan chatbot untuk mengetahui analisis data sensor dan kondisi sungai.")
+    st.sidebar.markdown("Menampilkan data sensor terkini dan grafik tren kondisi sungai.")
+elif page == "Deteksi Sampah":
+    st.sidebar.markdown("Mendeteksi sampah di sungai menggunakan gambar yang diunggah.")
+elif page == "Chat AI":
+    st.sidebar.markdown("Berinteraksi dengan chatbot untuk analisis data sensor.")
+elif page == "Laporan Warga":
+    st.sidebar.markdown("Mengirimkan laporan kondisi sungai langsung dari warga.")
 
 if page == "Dashboard":
     dashboard.main()
-elif page == "Computer Vision":
+elif page == "Deteksi Sampah":
     cv.main()
-elif page == "Chatbot":
+elif page == "Chat AI":
     chat.main()
+elif page == "Laporan Warga":
+    report.main()
