@@ -4,3 +4,10 @@ pandas
 altair
 google-generativeai
 pymongo
+
+plotly
+streamlit-authenticator
+bcrypt
+streamlit_geolocation
+geopy
+faker
