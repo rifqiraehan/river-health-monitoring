@@ -13,3 +13,4 @@ geopy
 faker
 opencv-python
 streamlit_webrtc
+torch
