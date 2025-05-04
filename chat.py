@@ -1,107 +1,130 @@
 import streamlit as st
 import google.generativeai as genai
-from datetime import datetime
-from utils import get_mongo_data_for_chat
+from datetime import datetime, timedelta
+from mongo_utils import get_all_river_summaries
+from bson import ObjectId
 
 api_key = st.secrets["GOOGLE_API_KEY"]
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-2.0-flash')
+try:
+    model = genai.GenerativeModel('gemini-2.0-flash')
+except Exception as e:
+    st.error(f"Gagal memuat model Gemini: {e}")
+    st.stop()
 
-def get_answer(prompt, data_list):
-    if not data_list:
-        return "Maaf, saat ini tidak ada data sensor yang tersedia untuk menjawab pertanyaan kamu."
+DAYS_OF_HISTORY_FOR_CHATBOT = 7
 
-    latest_timestamp = data_list[-1]["timestamp"]
+def get_answer(chat_history, current_prompt, context_summary):
+    if not context_summary or "Terjadi kesalahan" in context_summary:
+        return f"Maaf, terjadi kesalahan saat memuat data untuk menjawab pertanyaan Anda: {context_summary}"
+    elif "Tidak ada data" in context_summary and len(context_summary.split("###")) <= 2:
+         return f"Maaf, tidak ada data sensor maupun laporan warga yang ditemukan untuk menjawab pertanyaan Anda saat ini."
 
-    context = f"Data berikut diambil dari catatan sensor sungai. Data terakhir tercatat pada {latest_timestamp}.\n"
-    for data in data_list:
-        rain_text = "hujan" if data["raindrop"] == 1 else "tidak hujan"
-        warning_text = "Ada peringatan banjir" if data.get("warning", 0) == 1 else "Tidak ada peringatan banjir"
-        context += (
-            f"- {data['timestamp']}: Jarak sensor terhadap permukaan air  {data['distance']:.2f} cm, "
-            f"{rain_text}, Suhu {data['temperature']}°C, Kelembaban {data['humidity']}%, "
-            f"{warning_text}\n"
-        )
 
-    final_prompt = f"""
-Kamu adalah chatbot pemantau kesehatan sungai yang hanya boleh memberikan jawaban berdasarkan data sensor yang tersedia.
+    formatted_history = []
+    for msg in chat_history:
+        role = "model" if msg["role"] == "assistant" else msg["role"]
+        formatted_history.append({"role": role, "parts": [msg["content"]]})
 
-Kamu adalah chatbot yang dibuat oleh Tim "stars we chase" dalam mengikuti Bootcamp Samsung Innovation Campus Batch 6 yang diselenggarakan oleh Hacktiv8. Anggotanya adalah:
+    if formatted_history and "Halo! Saya RiverBot" in formatted_history[0]["parts"][0]:
+         formatted_history.pop(0)
+
+
+    system_instruction = f"""
+Kamu adalah chatbot AI pemantau kesehatan sungai bernama 'RiverBot'. Tugasmu adalah menjawab pertanyaan pengguna **berdasarkan ringkasan data sensor DAN ringkasan laporan warga** selama {DAYS_OF_HISTORY_FOR_CHATBOT} hari terakhir yang diberikan untuk **beberapa lokasi sungai**. Kamu juga harus **memperhatikan riwayat percakapan sebelumnya** untuk menjaga konteks.
+
+Informasi Pengembang:
+Chatbot ini dibuat oleh Tim "stars we chase" (Bootcamp Samsung Innovation Campus Batch 6 - Hacktiv8):
 - Muhammad Alfarrel Arya Mahardika
 - Muhammad Bintang Saputra
 - Muhamad Beril Fikri Widjaya
 - Rifqi Raehan Hermawan
-Semua anggota berasal dalam 1 kampus sama yaitu Politeknik Elektronika Negeri Surabaya.
+Semua anggota berasal dari Politeknik Elektronika Negeri Surabaya (PENS).
+Aplikasi ini bertujuan untuk deteksi dini banjir dan monitoring kesehatan sungai.
 
-Tentang Aplikasi 'River Health Monitoring' ini:
-Kami ingin mengembangkan alat pendeteksi dini bencana banjir beserta monitoring kesehatan air sungai, agar terdapat peringatan sejak dini untuk mencegah munculnya bencana banjir dan untuk memantau kesehatan sungai.
+Ringkasan Data Sensor dan Laporan Warga dari Semua Lokasi Sungai (Periode: {DAYS_OF_HISTORY_FOR_CHATBOT} hari terakhir. Gunakan ini sebagai FAKTA UTAMA):
+{context_summary}
 
-Jika user menanyakan tentang suatu data selalu gunakan referensi kapan data terakhir diambil. Gunakan format 'Tanggal Nama Bulan Tahun, hours:minute'. Sehingga, menjadi Berdasarkan data terakhir yang diambil di ...
-
-{context}
-
-Berdasarkan data tersebut, jawab pertanyaan berikut ini:
-{prompt}
-
-Instruksi:
-- Jawaban harus ringkas dan jelas.
-- Jangan memberikan informasi tambahan yang tidak tersedia.
-- Jika data tidak mencukupi untuk menjawab, sampaikan dengan jujur.
-- Jawaban hanya berdasarkan data di atas.
-- Jangan memberikan asumsi atau informasi tambahan di luar data.
-- Jika data tidak tersedia untuk menjawab, katakan dengan jujur bahwa data tidak tersedia.
+Instruksi Penting:
+- Jawablah pertanyaan pengguna terakhir ({current_prompt}) berdasarkan **konteks percakapan sebelumnya** DAN **ringkasan data sensor serta laporan warga**.
+- Prioritaskan informasi dari **ringkasan data** sebagai sumber fakta. Bandingkan data sensor dengan laporan warga jika relevan dan diminta.
+- Jika pertanyaan pengguna merujuk pada percakapan sebelumnya, gunakan history untuk memahami rujukannya, lalu jawab berdasarkan data yang tersedia.
+- **Jangan** membuat asumsi, menambahkan informasi eksternal, atau data historis yang **tidak ada** dalam ringkasan {DAYS_OF_HISTORY_FOR_CHATBOT} hari terakhir.
+- Jika ringkasan tidak berisi informasi yang cukup untuk menjawab, katakan bahwa data spesifik tersebut tidak tersedia dalam ringkasan periode ini.
+- Selalu sebutkan nama sungai yang relevan dalam jawabanmu.
+- Sebutkan tanggal data terakhir (baik sensor maupun laporan) jika relevan atau ditanya.
+- Jangan mengulangi informasi pengembang kecuali ditanya secara spesifik.
+- Jangan menyebutkan nilai sensor mentah kecuali itu bagian dari ringkasan (rata-rata, maks, min). Cukup sebutkan kondisinya.
+- Tetap ringkas dan jelas.
 """
-    response = model.generate_content(final_prompt)
-    return response.text.strip()
+
+    model_instance = genai.GenerativeModel('gemini-2.0-flash')
+    chat = model_instance.start_chat(history=formatted_history)
+
+    try:
+        full_context_for_prompt = f"{system_instruction}\n\n---\n\nPrompt Pengguna: {current_prompt}"
+        response = chat.send_message(full_context_for_prompt)
+
+        return response.text.strip() if hasattr(response, 'text') else "Maaf, terjadi masalah dalam menghasilkan jawaban."
+    except Exception as e:
+        st.error(f"Error saat menghubungi AI: {e}")
+        return "Maaf, terjadi kesalahan saat mencoba menghasilkan jawaban dari AI."
 
 
 def main():
-    st.title("Chatbot Kesehatan Sungai")
+    st.title("Chatbot Kesehatan Sungai (RiverBot)")
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "Halo! Tanyakan aku tentang kondisi sungai berdasarkan data sensor ya! 😊"}]
-    if "has_user_asked" not in st.session_state:
-        st.session_state.has_user_asked = False
+    with st.spinner(f"Memuat ringkasan data {DAYS_OF_HISTORY_FOR_CHATBOT} hari terakhir..."):
+        data_summary, all_data_available = get_all_river_summaries(days_history=DAYS_OF_HISTORY_FOR_CHATBOT)
 
-    mongo_data = get_mongo_data_for_chat()
-    if not mongo_data:
-        st.error("Data dari sensor tidak tersedia.")
-        return
+    if not data_summary or "Terjadi kesalahan" in data_summary:
+        st.error(f"Gagal memuat data untuk chatbot: {data_summary}")
+        st.stop()
+    # elif not all_data_available:
+    #      st.warning("Beberapa data (sensor atau laporan warga) mungkin tidak tersedia untuk semua sungai dalam periode ini.")
 
-    for msg in st.session_state.messages:
+
+    if "messages_chat_multi" not in st.session_state:
+        st.session_state.messages_chat_multi = [{"role": "assistant", "content": "Halo! Saya RiverBot. Tanyakan tentang kondisi sungai yang dipantau berdasarkan data sensor dan laporan warga terakhir ya! 😊"}]
+
+
+    user_input = st.chat_input("Tanyakan tentang kondisi sungai...")
+    prompt = st.session_state.get("selected_prompt_chat_multi", user_input)
+
+    if prompt:
+        st.session_state.messages_chat_multi.append({"role": "user", "content": prompt})
+
+        with st.spinner("RiverBot sedang berpikir..."):
+            history_for_llm = st.session_state.messages_chat_multi[:-1]
+            answer = get_answer(history_for_llm, prompt, data_summary)
+
+        st.session_state.messages_chat_multi.append({"role": "assistant", "content": answer})
+
+        if "selected_prompt_chat_multi" in st.session_state:
+            del st.session_state.selected_prompt_chat_multi
+        st.rerun()
+
+    for msg in st.session_state.messages_chat_multi:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if not st.session_state.has_user_asked:
+
+    if len(st.session_state.messages_chat_multi) <= 1:
         st.markdown("💡 **Coba tanyakan ini:**")
         cols = st.columns(5)
         suggestions = [
-            "Apakah tren suhu meningkat?",
-            "Apakah kelembaban akhir-akhir ini stabil?",
-            "Apakah terjadi peningkatan ketinggian air?",
-            "Apakah kemungkinan terjadi banjir?",
-            "Bagaimana kondisi sungai akhir-akhir ini?"
+            "Bagaimana status terbaru semua sungai menurut sensor dan laporan?",
+            "Apakah ada laporan banjir di Sungai Keputih?",
+            "Bandingkan kondisi sampah yang dilaporkan warga di kedua sungai",
+            "Apakah status sensor sesuai dengan laporan warga terakhir?",
+            "Bagaimana kondisi umum sungai minggu ini?"
         ]
         for i, suggestion in enumerate(suggestions):
-            with cols[i]:
-                if st.button(suggestion, key=f"suggestion_{i}"):
-                    st.session_state.selected_prompt = suggestion
-                    st.session_state.has_user_asked = True
+            col_index = i % len(cols)
+            with cols[col_index]:
+                if st.button(suggestion, key=f"suggestion_chat_multi_{i}"):
+                    st.session_state.selected_prompt_chat_multi = suggestion
                     st.rerun()
-
-    user_input = st.chat_input("Tanyakan sesuatu...")
-    prompt = st.session_state.get("selected_prompt", user_input)
-    if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        answer = get_answer(prompt, mongo_data)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
-        with st.chat_message("assistant"):
-            st.markdown(answer)
-        st.session_state.has_user_asked = True
-        if "selected_prompt" in st.session_state:
-            del st.session_state.selected_prompt
 
 
 if __name__ == "__main__":
