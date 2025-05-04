@@ -6,12 +6,6 @@ import torch
 import numpy as np
 import urllib.request
 import threading
-import time
-import requests
-import streamlit as st
-import cv2
-import torch
-import numpy as np
 import requests
 import time
 
