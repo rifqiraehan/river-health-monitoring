@@ -12,3 +12,4 @@ streamlit_geolocation
 geopy
 faker
 opencv-python
+streamlit_webrtc
