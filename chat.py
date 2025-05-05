@@ -72,7 +72,10 @@ Instruksi Penting:
 
 
 def main():
-    st.title("Chatbot Kesehatan Sungai (RiverBot)")
+    st.markdown(
+        "<h2>Chatbot Kesehatan Sungai (RiverBot)</h2>",
+        unsafe_allow_html=True
+    )
 
     with st.spinner(f"Memuat ringkasan data {DAYS_OF_HISTORY_FOR_CHATBOT} hari terakhir..."):
         data_summary, all_data_available = get_all_river_summaries(days_history=DAYS_OF_HISTORY_FOR_CHATBOT)
