@@ -5,11 +5,5 @@ _to_farrel
 note.txt
 /venv
 /archives
-seeder.py
 /streamlit-webrtc
-distance.py
-manage.py
-seeder-report.py
 .streamlit/_dashboard_temp.py
-_to_ubidots_and_server/main-2-clean.py
-_to_ubidots_and_server/main-2.py
