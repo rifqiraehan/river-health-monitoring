@@ -5,5 +5,4 @@ _to_farrel
 note.txt
 /venv
 /archives
-/streamlit-webrtc
 .streamlit/_dashboard_temp.py
