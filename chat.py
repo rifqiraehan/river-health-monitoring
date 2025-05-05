@@ -114,13 +114,11 @@ def main():
 
     if len(st.session_state.messages_chat_multi) <= 1:
         st.markdown("💡 **Coba tanyakan ini:**")
-        cols = st.columns(5)
+        cols = st.columns(3)
         suggestions = [
             "Bagaimana status terbaru semua sungai menurut sensor dan laporan?",
             "Apakah ada laporan banjir di Sungai Keputih?",
-            "Bandingkan kondisi sampah yang dilaporkan warga di kedua sungai",
-            "Apakah status sensor sesuai dengan laporan warga terakhir?",
-            "Bagaimana kondisi umum sungai minggu ini?"
+            "Bagaimana laju kenaikan air sungai akhir-akhir ini?"
         ]
         for i, suggestion in enumerate(suggestions):
             col_index = i % len(cols)
