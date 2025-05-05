@@ -5,11 +5,10 @@ import io
 from streamlit_geolocation import streamlit_geolocation
 import time
 from bson import ObjectId
-import math # Impor modul math
+import math
 
-# Fungsi Haversine untuk menghitung jarak
 def haversine(lat1, lon1, lat2, lon2):
-    R = 6371.0 # Radius bumi dalam kilometer
+    R = 6371.0
 
     lat1_rad = math.radians(lat1)
     lon1_rad = math.radians(lon1)
