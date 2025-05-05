@@ -1,4 +1,3 @@
-# dashboard.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -46,7 +45,6 @@ def main():
     else:
          st.sidebar.error("Tidak ada data lokasi sungai yang tersedia.")
          st.stop()
-
 
     selected_river_name = st.sidebar.selectbox(
         "Pilih Lokasi Sungai",
@@ -99,11 +97,22 @@ def main():
             fetch_end_date = None
             data_valid = False
         elif fetch_start_date == fetch_end_date:
-             resample_freq = 'H'
-             graph_time_mode = f'Per Jam ({fetch_start_date.strftime("%d %b %Y")})'
+             resample_freq = '15T'
+             graph_time_mode = f'Per 15 Menit ({fetch_start_date.strftime("%d %b %Y")})'
         else:
              resample_freq = 'D'
              graph_time_mode = 'Harian'
+    else:
+        latest_data_from_db = get_mongo_data(limit=1, sort_order=DESCENDING, sungai_id=selected_sungai_id)
+        if latest_data_from_db:
+            latest_timestamp = pd.to_datetime(latest_data_from_db[0]['timestamp']).date()
+            fetch_start_date = latest_timestamp
+            fetch_end_date = latest_timestamp
+            resample_freq = '15T'
+            graph_time_mode = f'Per 15 Menit ({fetch_start_date.strftime("%d %b %Y")})'
+        else:
+            fetch_start_date = today_date
+            fetch_end_date = today_date
 
     st.markdown(
         "<h2>River Health Monitoring</h2>",
@@ -132,7 +141,6 @@ def main():
     .stPlotlyChart { overflow-x: auto; }
     </style>
     """, unsafe_allow_html=True)
-
 
     subheader_text = f"Data Terkini di {selected_river_name}"
     st.subheader(subheader_text)
@@ -164,11 +172,9 @@ def main():
 
     rate_graph_placeholder = st.empty()
     temp_hum_graph_placeholder = st.empty()
-    turbidity_graph_placeholder = st.empty() # Placeholder untuk grafik turbidity
-
-    map_subheader_placeholder = st.empty() # Placeholder untuk subheader map
-    map_placeholder = st.empty() # Placeholder untuk map
-
+    turbidity_graph_placeholder = st.empty()
+    map_subheader_placeholder = st.empty()
+    map_placeholder = st.empty()
 
     data_valid = True
     if fetch_start_date is None or fetch_end_date is None:
@@ -207,7 +213,7 @@ def main():
 
                 df_full.sort_index(inplace=True)
 
-                latest_data_from_db = get_mongo_data(limit=1, sort_order=DESCENDING, sungai_id=selected_sungai_id)
+                latest_data_from_db = get_mongo_data(fetch_start_date, fetch_end_date, sungai_id=selected_sungai_id, sort_order=DESCENDING)
 
                 if latest_data_from_db:
                      latest_data = latest_data_from_db[0]
@@ -215,7 +221,6 @@ def main():
                          latest_data['timestamp'] = pd.to_datetime(latest_data['timestamp'])
                 else:
                      latest_data = df_full.iloc[-1].to_dict() if not df_full.empty else None
-
 
                 cols_to_average = [col for col in ['delta_per_min', 'temperature', 'humidity', 'turbidity_voltage'] if col in df_full.columns and not df_full[col].isnull().all()]
 
@@ -230,7 +235,6 @@ def main():
                          df_graph_data = df_to_resample[cols_to_average].resample(resample_freq).mean().dropna(how='all')
                     else:
                          df_graph_data = pd.DataFrame()
-
                 else:
                     df_graph_data = pd.DataFrame()
         else:
@@ -238,19 +242,17 @@ def main():
              df_graph_data = pd.DataFrame()
              latest_data = None
 
-
     if latest_data:
         last_updated_time = latest_data.get('timestamp', datetime.now())
         formatted_time = last_updated_time.strftime("%d %B %Y, %H:%M:%S")
         timestamp_placeholder.caption(f"Data terakhir diperbarui di {selected_river_name} pada **{formatted_time}**")
-
 
         rate_val = latest_data.get('delta_per_min', None)
         rate_text = f"{rate_val:.2f}" if pd.notna(rate_val) else "N/A"
         rate_placeholder.markdown(f"""<div class="metric-card bg-blue"><i class="fas fa-tachometer-alt metric-icon"></i><div class="text-content"><div class="metric-title">Laju Perubahan (cm/min)</div><div class="metric-value">{rate_text}</div></div></div>""", unsafe_allow_html=True)
 
         rain_val = latest_data.get('raindrop_percent', 0)
-        rain_status = "Hujan" if pd.notna(rain_val) and rain_val > 60 else "Tidak Hujan" # Sesuaikan threshold % jika perlu
+        rain_status = "Hujan" if pd.notna(rain_val) and rain_val > 60 else "Tidak Hujan"
         rain_placeholder.markdown(f"""<div class="metric-card bg-green"><i class="fas fa-cloud-rain metric-icon"></i><div class="text-content"><div class="metric-title">Status Hujan</div><div class="metric-value">{rain_status}</div></div></div>""", unsafe_allow_html=True)
 
         temp_val = latest_data.get('temperature', None)
@@ -266,7 +268,6 @@ def main():
         turbidity_status = "Keruh" if pd.notna(turb_val) and turb_val > TURBIDITY_CLEAR_THRESHOLD_V else "Jernih"
         turbidity_placeholder.markdown(f"""<div class="metric-card bg-brown"><i class="fas fa-smog metric-icon"></i><div class="text-content"><div class="metric-title">Kekeruhan ({turbidity_status})</div><div class="metric-value">{turb_text}</div></div></div>""", unsafe_allow_html=True)
 
-
         status_text = latest_data.get('status', 'Tidak Diketahui') if pd.notna(latest_data.get('status')) else 'Tidak Diketahui'
         status_color = "bg-red" if "Bahaya" in status_text else "bg-purple"
         status_placeholder.markdown(f"""<div class="metric-card {status_color}"><i class="fas fa-info-circle metric-icon"></i><div class="text-content"><div class="metric-title">Status</div><div class="metric-value">{status_text}</div></div></div>""", unsafe_allow_html=True)
@@ -279,7 +280,6 @@ def main():
          timestamp_placeholder.caption("Silakan pilih rentang tanggal yang valid.")
          for ph in metric_placeholders:
              ph.empty()
-
 
     fig_rate_avg = go.Figure()
     if not df_graph_data.empty and 'delta_per_min' in df_graph_data.columns and not df_graph_data['delta_per_min'].isnull().all():
@@ -303,7 +303,7 @@ def main():
 
         xaxis_title = "Waktu"
         if resample_freq == 'D': xaxis_title = "Tanggal"
-        elif resample_freq == 'H': xaxis_title = "Waktu (Jam)"
+        elif resample_freq == '15T': xaxis_title = "Waktu (15 Menit)"
         elif resample_freq == '30T': xaxis_title = "Waktu (30 Menit)"
 
         fig_rate_avg.update_layout(
@@ -320,7 +320,6 @@ def main():
     elif data_valid:
          rate_graph_placeholder.info("Data rata-rata laju perubahan tidak tersedia.")
 
-
     fig_temp_hum_avg = go.Figure()
     temp_trace_added = False
     hum_trace_added = False
@@ -334,7 +333,7 @@ def main():
     if temp_trace_added or hum_trace_added:
         xaxis_title = "Waktu"
         if resample_freq == 'D': xaxis_title = "Tanggal"
-        elif resample_freq == 'H': xaxis_title = "Waktu (Jam)"
+        elif resample_freq == '15T': xaxis_title = "Waktu (15 Menit)"
         elif resample_freq == '30T': xaxis_title = "Waktu (30 Menit)"
 
         fig_temp_hum_avg.update_layout(
@@ -350,7 +349,6 @@ def main():
         temp_hum_graph_placeholder.plotly_chart(fig_temp_hum_avg, use_container_width=True)
     elif data_valid:
          temp_hum_graph_placeholder.info("Data rata-rata suhu/kelembaban tidak tersedia.")
-
 
     fig_turbidity_avg = go.Figure()
     if not df_graph_data.empty and 'turbidity_voltage' in df_graph_data.columns and not df_graph_data['turbidity_voltage'].isnull().all():
@@ -374,7 +372,7 @@ def main():
 
         xaxis_title = "Waktu"
         if resample_freq == 'D': xaxis_title = "Tanggal"
-        elif resample_freq == 'H': xaxis_title = "Waktu (Jam)"
+        elif resample_freq == '15T': xaxis_title = "Waktu (15 Menit)"
         elif resample_freq == '30T': xaxis_title = "Waktu (30 Menit)"
 
         fig_turbidity_avg.update_layout(
@@ -390,7 +388,6 @@ def main():
         turbidity_graph_placeholder.plotly_chart(fig_turbidity_avg, use_container_width=True)
     elif data_valid:
         turbidity_graph_placeholder.info("Data rata-rata kekeruhan tidak tersedia.")
-
 
     map_subheader_placeholder.subheader("Lokasi Sungai")
     if selected_river_coords:
@@ -410,7 +407,6 @@ def main():
     else:
          with map_placeholder:
               st.info("Data koordinat tidak ditemukan untuk sungai yang dipilih.")
-
 
     time.sleep(60)
     st.rerun()
