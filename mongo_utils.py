@@ -166,7 +166,7 @@ def _process_single_river_summary(db, monitoring_collection_name, river_id, rive
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df.set_index('timestamp', inplace=True)
 
-    numeric_cols = ['delta_per_min', 'temperature', 'humidity', 'raindrop', 'distance']
+    numeric_cols = ['delta_per_min', 'temperature', 'humidity', 'raindrop_percent', 'distance']
     for col in numeric_cols:
          if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
          else: df[col] = pd.NA
@@ -179,7 +179,7 @@ def _process_single_river_summary(db, monitoring_collection_name, river_id, rive
     latest_rate = latest_reading.get('delta_per_min')
     latest_temp = latest_reading.get('temperature')
     latest_hum = latest_reading.get('humidity')
-    latest_rain = latest_reading.get('raindrop')
+    latest_rain = latest_reading.get('raindrop_percent')
     latest_status = latest_reading.get('status', 'N/A')
 
     summary += f"*   Status Sensor: **{latest_status}**\n"
@@ -202,7 +202,7 @@ def _process_single_river_summary(db, monitoring_collection_name, river_id, rive
     if pd.notna(avg_temp): summary += f"*   Rata-rata Suhu: {avg_temp:.1f}°C\n"
     if pd.notna(avg_hum): summary += f"*   Rata-rata Kelembaban: {avg_hum:.1f}%\n"
     if danger_periods > 0: summary += f"*   Peringatan Bahaya Banjir dari Sensor: {danger_periods} kali\n"
-    rainy_periods_count = df[df['raindrop'] > 500].shape[0]
+    rainy_periods_count = df[df['raindrop_percent'] > 500].shape[0]
     if rainy_periods_count > 0:
         summary += f"*   Sensor mendeteksi adanya periode hujan.\n"
     else:
