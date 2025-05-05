@@ -10,7 +10,6 @@ from bson import ObjectId
 
 time_min = datetime_time.min
 time_max = datetime_time.max
-
 RATE_THRESHOLD_DANGER_RAIN = 2.0
 RATE_THRESHOLD_DANGER_NO_RAIN = 5.0
 RATE_THRESHOLD_STABLE = 0.0
@@ -32,20 +31,7 @@ def main():
                         for river in river_locations}
 
     default_river_name = "Sungai Keputih Tegal Timur"
-
-    default_index = 0
-    if default_river_name in river_names:
-        try:
-            default_index = river_names.index(default_river_name)
-        except ValueError:
-            default_index = 0
-    elif river_names:
-        default_river_name = river_names[0]
-        default_index = 0
-    else:
-         st.sidebar.error("Tidak ada data lokasi sungai yang tersedia.")
-         st.stop()
-
+    default_index = river_names.index(default_river_name) if default_river_name in river_names else 0
     selected_river_name = st.sidebar.selectbox(
         "Pilih Lokasi Sungai",
         options=river_names,
@@ -58,67 +44,64 @@ def main():
     use_date_range = st.sidebar.toggle("Filter Rentang Tanggal", value=False)
 
     today_date = datetime.now().date()
-    now_dt = datetime.now()
 
     default_start_date = today_date - timedelta(days=7)
     default_end_date = today_date
 
-    start_date = default_start_date
-    end_date = default_end_date
     df_full = pd.DataFrame()
     df_graph_data = pd.DataFrame()
-    latest_data = None
     resample_freq = '30T'
-    graph_time_mode = '30 Menit (5 Jam Terakhir)'
-    fetch_start_date = today_date
-    fetch_end_date = today_date
+    graph_time_mode = '30 Menit (5 Jam Terakhir dari Data Terbaru)'
+    fetch_start_datetime = None
+    fetch_end_datetime = None
     data_valid = True
+
+    latest_data_from_db = get_mongo_data(
+        limit=1,
+        sort_order=DESCENDING,
+        sungai_id=selected_sungai_id
+    )
+    latest_data = latest_data_from_db[0] if latest_data_from_db else None
+    if latest_data and 'timestamp' in latest_data:
+        latest_data['timestamp'] = pd.to_datetime(latest_data['timestamp'], errors='coerce')
 
     if use_date_range:
         col1, col2 = st.sidebar.columns(2)
         with col1:
             start_date_selected = st.date_input("Tanggal Mulai", default_start_date)
-
-        end_date_default_for_widget = max(start_date_selected, default_end_date)
-
         with col2:
             end_date_selected = st.date_input(
                 "Tanggal Selesai",
-                value=end_date_default_for_widget,
+                value=max(start_date_selected, default_end_date),
                 min_value=start_date_selected
             )
 
-        fetch_start_date = start_date_selected
-        fetch_end_date = end_date_selected
+        fetch_start_datetime = datetime.combine(start_date_selected, datetime_time.min)
+        fetch_end_datetime = datetime.combine(end_date_selected, datetime_time.max)
 
-        if fetch_start_date > fetch_end_date:
+        if fetch_start_datetime > fetch_end_datetime:
             st.sidebar.error("Tanggal Selesai tidak boleh sebelum Tanggal Mulai.")
-            fetch_start_date = None
-            fetch_end_date = None
             data_valid = False
-        elif fetch_start_date == fetch_end_date:
-             resample_freq = '15T'
-             graph_time_mode = f'Per 15 Menit ({fetch_start_date.strftime("%d %b %Y")})'
-        else:
-             resample_freq = 'D'
-             graph_time_mode = 'Harian'
-    else:
-        latest_data_from_db = get_mongo_data(limit=1, sort_order=DESCENDING, sungai_id=selected_sungai_id)
-        if latest_data_from_db:
-            latest_timestamp = pd.to_datetime(latest_data_from_db[0]['timestamp']).date()
-            fetch_start_date = latest_timestamp
-            fetch_end_date = latest_timestamp
+        elif start_date_selected == end_date_selected:
             resample_freq = '15T'
-            graph_time_mode = f'Per 15 Menit ({fetch_start_date.strftime("%d %b %Y")})'
+            graph_time_mode = f'Per 15 Menit ({start_date_selected.strftime("%d %b %Y")})'
         else:
-            fetch_start_date = today_date
-            fetch_end_date = today_date
+            resample_freq = 'D'
+            graph_time_mode = 'Harian'
+    else:
+        if latest_data and not pd.isna(latest_data['timestamp']):
+            latest_timestamp = latest_data['timestamp']
+            fetch_end_datetime = latest_timestamp
+            fetch_start_datetime = fetch_end_datetime - timedelta(hours=5)
+            resample_freq = '15T'
+            graph_time_mode = f'Per 15 Menit (5 Jam hingga {fetch_end_datetime.strftime("%d %b %Y, %H:%M")})'
+        else:
+            st.warning("Tidak ada data terbaru dalam database untuk grafik.")
+            fetch_start_datetime = datetime.combine(today_date, datetime_time.min)
+            fetch_end_datetime = datetime.combine(today_date, datetime_time.max)
+            data_valid = False
 
-    st.markdown(
-        "<h2>River Health Monitoring</h2>",
-        unsafe_allow_html=True
-    )
-
+    st.markdown("<h2>River Health Monitoring</h2>", unsafe_allow_html=True)
     st.markdown("""
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
@@ -126,7 +109,6 @@ def main():
     .metric-card.loading { background-color: #e5e7eb; animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
     .metric-card.loading .metric-title, .metric-card.loading .metric-value, .metric-card.loading .metric-icon { visibility: hidden; }
-
     .bg-blue { background-color: #3b82f6; }
     .bg-green { background-color: #10b981; }
     .bg-red { background-color: #ef4444; }
@@ -163,7 +145,7 @@ def main():
     ]
 
     for ph in metric_placeholders:
-         ph.markdown(f"""<div class="metric-card loading"></div>""", unsafe_allow_html=True)
+        ph.markdown(f"""<div class="metric-card loading"></div>""", unsafe_allow_html=True)
 
     st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
 
@@ -176,74 +158,8 @@ def main():
     map_subheader_placeholder = st.empty()
     map_placeholder = st.empty()
 
-    data_valid = True
-    if fetch_start_date is None or fetch_end_date is None:
-         data_valid = False
-
-    with st.spinner("Memuat data grafik..."):
-        if data_valid:
-            mongo_data = get_mongo_data(fetch_start_date, fetch_end_date, sungai_id=selected_sungai_id, sort_order=ASCENDING)
-
-            if not mongo_data:
-                st.warning(f"Tidak ada data ditemukan untuk {selected_river_name} pada rentang waktu yang dipilih.")
-                rate_graph_placeholder.empty()
-                temp_hum_graph_placeholder.empty()
-                turbidity_graph_placeholder.empty()
-                map_placeholder.empty()
-                map_subheader_placeholder.empty()
-                df_full = pd.DataFrame()
-                latest_data = None
-            else:
-                df_full = pd.DataFrame(mongo_data)
-
-                if 'timestamp' in df_full.columns:
-                     df_full['timestamp'] = pd.to_datetime(df_full['timestamp'])
-                     df_full.set_index('timestamp', inplace=True)
-                else:
-                     st.error("Kolom 'timestamp' tidak ditemukan dalam data.")
-                     st.stop()
-
-                numeric_cols = ['delta_per_min', 'temperature', 'humidity', 'raindrop_percent', 'distance', 'turbidity_voltage']
-                for col in numeric_cols:
-                    if col not in df_full.columns:
-                         st.warning(f"Kolom '{col}' tidak ditemukan. Grafik/Metrik '{col}' mungkin tidak ditampilkan.")
-                         df_full[col] = pd.NA
-                    else:
-                         df_full[col] = pd.to_numeric(df_full[col], errors='coerce')
-
-                df_full.sort_index(inplace=True)
-
-                latest_data_from_db = get_mongo_data(fetch_start_date, fetch_end_date, sungai_id=selected_sungai_id, sort_order=DESCENDING)
-
-                if latest_data_from_db:
-                     latest_data = latest_data_from_db[0]
-                     if 'timestamp' in latest_data:
-                         latest_data['timestamp'] = pd.to_datetime(latest_data['timestamp'])
-                else:
-                     latest_data = df_full.iloc[-1].to_dict() if not df_full.empty else None
-
-                cols_to_average = [col for col in ['delta_per_min', 'temperature', 'humidity', 'turbidity_voltage'] if col in df_full.columns and not df_full[col].isnull().all()]
-
-                if cols_to_average:
-                    df_to_resample = df_full
-
-                    if not use_date_range:
-                        five_hours_ago = now_dt - timedelta(hours=5)
-                        df_to_resample = df_full[df_full.index >= five_hours_ago]
-
-                    if not df_to_resample.empty:
-                         df_graph_data = df_to_resample[cols_to_average].resample(resample_freq).mean().dropna(how='all')
-                    else:
-                         df_graph_data = pd.DataFrame()
-                else:
-                    df_graph_data = pd.DataFrame()
-        else:
-             df_full = pd.DataFrame()
-             df_graph_data = pd.DataFrame()
-             latest_data = None
-
-    if latest_data:
-        last_updated_time = latest_data.get('timestamp', datetime.now())
+    if latest_data and not pd.isna(latest_data['timestamp']):
+        last_updated_time = latest_data['timestamp']
         formatted_time = last_updated_time.strftime("%d %B %Y, %H:%M:%S")
         timestamp_placeholder.caption(f"Data terakhir diperbarui di {selected_river_name} pada **{formatted_time}**")
 
@@ -271,15 +187,74 @@ def main():
         status_text = latest_data.get('status', 'Tidak Diketahui') if pd.notna(latest_data.get('status')) else 'Tidak Diketahui'
         status_color = "bg-red" if "Bahaya" in status_text else "bg-purple"
         status_placeholder.markdown(f"""<div class="metric-card {status_color}"><i class="fas fa-info-circle metric-icon"></i><div class="text-content"><div class="metric-title">Status</div><div class="metric-value">{status_text}</div></div></div>""", unsafe_allow_html=True)
-    elif data_valid:
-         timestamp_placeholder.caption("Tidak ada data terbaru.")
-         for ph in metric_placeholders:
-            ph.empty()
-         st.warning("Tidak dapat memuat data terbaru untuk metrik.")
     else:
-         timestamp_placeholder.caption("Silakan pilih rentang tanggal yang valid.")
-         for ph in metric_placeholders:
-             ph.empty()
+        timestamp_placeholder.caption("Tidak ada data terbaru.")
+        for ph in metric_placeholders:
+            ph.empty()
+        st.warning("Tidak dapat memuat data terbaru untuk metrik.")
+
+    if data_valid and fetch_start_datetime and fetch_end_datetime:
+        with st.spinner("Memuat data grafik..."):
+            mongo_data = get_mongo_data(
+                start_date=fetch_start_datetime,
+                end_date=fetch_end_datetime,
+                sungai_id=selected_sungai_id,
+                sort_order=ASCENDING
+            )
+
+            if not mongo_data:
+                st.warning(f"Tidak ada data ditemukan untuk {selected_river_name} pada rentang waktu yang dipilih.")
+                rate_graph_placeholder.empty()
+                temp_hum_graph_placeholder.empty()
+                turbidity_graph_placeholder.empty()
+                df_full = pd.DataFrame()
+                df_graph_data = pd.DataFrame()
+            else:
+                df_full = pd.DataFrame(mongo_data)
+
+                if 'timestamp' in df_full.columns:
+                    df_full['timestamp'] = pd.to_datetime(df_full['timestamp'], errors='coerce')
+                    df_full.set_index('timestamp', inplace=True)
+                    if df_full.index.isna().all():
+                        st.error("Semua timestamp tidak valid.")
+                        data_valid = False
+                else:
+                    st.error("Kolom 'timestamp' tidak ditemukan dalam data.")
+                    data_valid = False
+
+                if data_valid:
+                    numeric_cols = ['delta_per_min', 'temperature', 'humidity', 'raindrop_percent', 'distance', 'turbidity_voltage']
+                    for col in numeric_cols:
+                        if col not in df_full.columns:
+                            st.warning(f"Kolom '{col}' tidak ditemukan dalam data.")
+                            df_full[col] = pd.NA
+                        else:
+                            df_full[col] = pd.to_numeric(df_full[col], errors='coerce')
+                            if df_full[col].isnull().all():
+                                st.warning(f"Kolom '{col}' hanya berisi nilai null.")
+
+                    df_full.sort_index(inplace=True)
+
+                    cols_to_average = [col for col in ['delta_per_min', 'temperature', 'humidity', 'turbidity_voltage'] if col in df_full.columns and not df_full[col].isnull().all()]
+
+                    if cols_to_average:
+                        df_to_resample = df_full[
+                            (df_full.index >= fetch_start_datetime) &
+                            (df_full.index <= fetch_end_datetime)
+                        ]
+
+                        if not df_to_resample.empty:
+                            df_to_resample = df_to_resample.interpolate(method='time', limit_direction='both')
+                            df_graph_data = df_to_resample[cols_to_average].resample(resample_freq).mean().dropna(how='all')
+                        else:
+                            df_graph_data = pd.DataFrame()
+                            st.warning("Tidak ada data dalam rentang waktu yang dipilih untuk grafik.")
+                    else:
+                        df_graph_data = pd.DataFrame()
+                        st.warning("Tidak ada kolom numerik yang valid untuk grafik.")
+    else:
+        df_full = pd.DataFrame()
+        df_graph_data = pd.DataFrame()
 
     fig_rate_avg = go.Figure()
     if not df_graph_data.empty and 'delta_per_min' in df_graph_data.columns and not df_graph_data['delta_per_min'].isnull().all():
@@ -318,7 +293,7 @@ def main():
         )
         rate_graph_placeholder.plotly_chart(fig_rate_avg, use_container_width=True)
     elif data_valid:
-         rate_graph_placeholder.info("Data rata-rata laju perubahan tidak tersedia.")
+        rate_graph_placeholder.info("Data rata-rata laju perubahan tidak tersedia.")
 
     fig_temp_hum_avg = go.Figure()
     temp_trace_added = False
@@ -348,7 +323,7 @@ def main():
         )
         temp_hum_graph_placeholder.plotly_chart(fig_temp_hum_avg, use_container_width=True)
     elif data_valid:
-         temp_hum_graph_placeholder.info("Data rata-rata suhu/kelembaban tidak tersedia.")
+        temp_hum_graph_placeholder.info("Data rata-rata suhu/kelembaban tidak tersedia.")
 
     fig_turbidity_avg = go.Figure()
     if not df_graph_data.empty and 'turbidity_voltage' in df_graph_data.columns and not df_graph_data['turbidity_voltage'].isnull().all():
@@ -391,22 +366,22 @@ def main():
 
     map_subheader_placeholder.subheader("Lokasi Sungai")
     if selected_river_coords:
-         river_lat = selected_river_coords.get('latitude')
-         river_lon = selected_river_coords.get('longitude')
-         if river_lat is not None and river_lon is not None:
-              map_df = pd.DataFrame({
-                  'lat': [river_lat],
-                  'lon': [river_lon],
-                  'nama': [selected_river_name]
-              })
-              with map_placeholder:
-                   st.map(map_df, zoom=14)
-         else:
-              with map_placeholder:
-                   st.info(f"Data koordinat tidak tersedia untuk {selected_river_name}.")
+        river_lat = selected_river_coords.get('latitude')
+        river_lon = selected_river_coords.get('longitude')
+        if river_lat is not None and river_lon is not None:
+            map_df = pd.DataFrame({
+                'lat': [river_lat],
+                'lon': [river_lon],
+                'nama': [selected_river_name]
+            })
+            with map_placeholder:
+                st.map(map_df, zoom=14)
+        else:
+            with map_placeholder:
+                st.info(f"Data koordinat tidak tersedia untuk {selected_river_name}.")
     else:
-         with map_placeholder:
-              st.info("Data koordinat tidak ditemukan untuk sungai yang dipilih.")
+        with map_placeholder:
+            st.info("Data koordinat tidak ditemukan untuk sungai yang dipilih.")
 
     time.sleep(60)
     st.rerun()
