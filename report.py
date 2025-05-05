@@ -26,7 +26,10 @@ def haversine(lat1, lon1, lat2, lon2):
     return distance_km
 
 def main():
-    st.title("Laporan Warga")
+    st.markdown(
+        "<h2>Laporan Warga</h2>",
+        unsafe_allow_html=True
+    )
     st.write("Gunakan formulir ini untuk melaporkan kondisi terkini di sekitar sungai.")
     st.info("Untuk mengirim laporan, Anda **harus** berada dalam radius 1 km dari lokasi sungai yang dipilih, mengizinkan akses lokasi, dan mengambil foto kondisi sungai.")
 
