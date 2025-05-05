@@ -59,7 +59,10 @@ def stream_esp32(url, frame_window):
 
 # Main function for Streamlit app
 def main():
-    st.title("🚮 Deteksi Sampah di Sungai")
+    st.markdown(
+        "<h2>Deteksi Sampah di Sungai</h2>",
+        unsafe_allow_html=True
+    )
 
     with st.sidebar.expander("🔧 Pengaturan Kamera"):
         CAM_SOURCE = st.radio("🎥 Pilih Sumber Kamera", ("Kamera Laptop/USB", "ESP32-CAM"))
