@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from pymongo import MongoClient, errors as pymongo_errors
 import paho.mqtt.client as mqtt
+from paho.mqtt.client import CallbackAPIVersion
 from datetime import datetime
 import base64
 from io import BytesIO
@@ -8,6 +9,8 @@ from PIL import Image
 import logging
 from math import radians, sin, cos, sqrt, atan2
 from bson import ObjectId
+import ssl
+import json
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(name)s:%(message)s')
@@ -23,6 +26,7 @@ MQTT_PORT = 8883
 MQTT_USER = "hivemq.webclient.1747043871321"
 MQTT_PASS = "ab45PjNdISi;Bf9>2,G#"
 IMAGE_TOPIC = "starswechase/sungai/cv/camera/image_base64"
+SENSOR_TOPIC = "starswechase/sungai/sensor/data"
 
 client = None
 db = None
@@ -43,35 +47,44 @@ except pymongo_errors.ConnectionFailure as e:
 except Exception as e:
     logging.error(f"An unexpected error occurred during MongoDB setup: {e}", exc_info=True)
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         logging.info("Connected to MQTT broker")
         client.subscribe(IMAGE_TOPIC)
+        client.subscribe(SENSOR_TOPIC)
     else:
         logging.error(f"Failed to connect to MQTT broker, return code {rc}")
 
-def on_message(client, userdata, msg):
+def on_message(client, userdata, msg, properties=None):
     try:
-        logging.info(f"Received message on {msg.topic}")
-        encoded_image = msg.payload.decode('utf-8')
-        img_data = base64.b64decode(encoded_image)
-        img = Image.open(BytesIO(img_data))
-
-        image_doc = {
-            "timestamp": datetime.now(),
-            "river_id": "",
-            "image_data": img_data,
-            "format": img.format,
-            "size": img.size
-        }
-        image_collection.insert_one(image_doc)
-        logging.info("Image saved to MongoDB")
+        if msg.topic == IMAGE_TOPIC:
+            logging.info(f"Received image on {msg.topic}")
+            encoded_image = msg.payload.decode('utf-8')
+            img_data = base64.b64decode(encoded_image)
+            img = Image.open(BytesIO(img_data))
+            image_doc = {
+                "timestamp": datetime.now(),
+                "river_id": "",
+                "image_data": img_data,
+                "format": img.format,
+                "size": img.size
+            }
+            image_collection.insert_one(image_doc)
+            logging.info("Image saved to MongoDB")
+        elif msg.topic == SENSOR_TOPIC:
+            logging.info(f"Received sensor data on {msg.topic}")
+            payload = json.loads(msg.payload.decode('utf-8'))
+            inserted_id, river_name = process_sensor_data(payload)
+            if inserted_id:
+                logging.info(f"Sensor data saved to MongoDB for river '{river_name}' with ID: {inserted_id}")
+            else:
+                logging.error("Failed to save sensor data to MongoDB")
     except Exception as e:
-        logging.error(f"Error processing MQTT message: {e}")
+        logging.error(f"Error processing MQTT message on {msg.topic}: {e}")
 
-mqtt_client = mqtt.Client()
+mqtt_client = mqtt.Client(callback_api_version=CallbackAPIVersion.VERSION2)
 mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
-mqtt_client.tls_set()
+mqtt_client.tls_set(cert_reqs=ssl.CERT_NONE)
 mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 
@@ -96,26 +109,13 @@ def haversine(lat1, lon1, lat2, lon2):
     distance = R * c * 1000
     return distance
 
-@app.route("/sensor", methods=["POST"])
-def receive_sensor_data():
-    if monitoring_collection is None or river_collection is None:
-        app.logger.error("MongoDB collections are not available (failed during startup). Cannot process request.")
-        return jsonify({"error": "Database connection error - check server logs"}), 500
-
-    data = request.get_json()
-
-    if not data:
-        app.logger.warning("Received empty or non-JSON payload.")
-        return jsonify({"error": "Invalid data: No valid JSON payload received"}), 400
-
-    app.logger.info(f"Received data payload: {data}")
-
+def process_sensor_data(data):
     try:
         required_fields = ["status", "danger_banjir", "danger_humidity"]
         missing_fields = [field for field in required_fields if data.get(field) is None]
         if missing_fields:
-             app.logger.warning(f"Received data missing essential fields: {', '.join(missing_fields)}. Payload: {data}")
-             return jsonify({"error": f"Invalid data: Missing essential fields ({', '.join(missing_fields)})"}), 400
+            app.logger.warning(f"Received data missing essential fields: {', '.join(missing_fields)}. Payload: {data}")
+            return None, None
 
         received_status = data["status"]
         danger_banjir = data["danger_banjir"]
@@ -130,21 +130,27 @@ def receive_sensor_data():
             final_status = "Aman"
             app.logger.info(f"Overriding status '{received_status}' to 'Aman' because delta_per_min is None.")
         elif delta_per_min_raw is None:
-             app.logger.warning(f"delta_per_min is None, but status is '{received_status}'. Keeping received status.")
+            app.logger.warning(f"delta_per_min is None, but status is '{received_status}'. Keeping received status.")
 
         sensor_latitude = None
         sensor_longitude = None
         turbidity_voltage = None
 
         if latitude_raw is not None:
-            try: sensor_latitude = float(latitude_raw)
-            except (ValueError, TypeError): app.logger.warning(f"Invalid latitude value, cannot convert to float: {latitude_raw}")
+            try:
+                sensor_latitude = float(latitude_raw)
+            except (ValueError, TypeError):
+                app.logger.warning(f"Invalid latitude value, cannot convert to float: {latitude_raw}")
         if longitude_raw is not None:
-            try: sensor_longitude = float(longitude_raw)
-            except (ValueError, TypeError): app.logger.warning(f"Invalid longitude value, cannot convert to float: {longitude_raw}")
+            try:
+                sensor_longitude = float(longitude_raw)
+            except (ValueError, TypeError):
+                app.logger.warning(f"Invalid longitude value, cannot convert to float: {longitude_raw}")
         if turbidity_voltage_raw is not None:
-            try: turbidity_voltage = float(turbidity_voltage_raw)
-            except (ValueError, TypeError): app.logger.warning(f"Invalid turbidity_voltage value, cannot convert to float: {turbidity_voltage_raw}")
+            try:
+                turbidity_voltage = float(turbidity_voltage_raw)
+            except (ValueError, TypeError):
+                app.logger.warning(f"Invalid turbidity_voltage value, cannot convert to float: {turbidity_voltage_raw}")
 
         closest_river_id = None
         assigned_river_name = "N/A"
@@ -169,8 +175,7 @@ def receive_sensor_data():
                 else:
                     app.logger.warning("No rivers with coordinates found in the database to compare distance.")
             except Exception as geo_e:
-                 app.logger.error(f"Error during closest river calculation: {geo_e}", exc_info=True)
-
+                app.logger.error(f"Error during closest river calculation: {geo_e}", exc_info=True)
         else:
             app.logger.info("Sensor coordinates not provided, attempting to assign default river 'Sungai Keputih Tegal Timur'.")
             try:
@@ -180,7 +185,7 @@ def receive_sensor_data():
                     assigned_river_name = keputih.get("nama")
                     app.logger.info(f"Assigned default river: {assigned_river_name} (ID: {closest_river_id})")
                 else:
-                     app.logger.warning("Default river 'Sungai Keputih Tegal Timur' not found.")
+                    app.logger.warning("Default river 'Sungai Keputih Tegal Timur' not found.")
             except Exception as default_e:
                 app.logger.error(f"Error finding default river: {default_e}", exc_info=True)
 
@@ -205,17 +210,30 @@ def receive_sensor_data():
 
         insert_result = monitoring_collection.insert_one(sensor_data_cleaned)
         app.logger.info(f"Data saved successfully for river '{assigned_river_name}' with ID: {insert_result.inserted_id}")
-        return jsonify({"message": "Data received and saved", "id": str(insert_result.inserted_id), "assigned_river": assigned_river_name}), 200
-
-    except KeyError as ke:
-        app.logger.error(f"Missing key in received JSON data: {ke}. Payload: {data}", exc_info=True)
-        return jsonify({"error": f"Invalid data: Missing key '{ke}'"}), 400
-    except pymongo_errors.PyMongoError as pe:
-        app.logger.error(f"MongoDB Error during insert: {pe}", exc_info=True)
-        return jsonify({"error": f"Database insert error: {pe}"}), 500
+        return insert_result.inserted_id, assigned_river_name
     except Exception as e:
-        app.logger.error(f"Error processing request: {e}", exc_info=True)
-        return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500
+        app.logger.error(f"Error processing sensor data: {e}", exc_info=True)
+        return None, None
+
+@app.route("/sensor", methods=["POST"])
+def receive_sensor_data():
+    if monitoring_collection is None or river_collection is None:
+        app.logger.error("MongoDB collections are not available (failed during startup). Cannot process request.")
+        return jsonify({"error": "Database connection error - check server logs"}), 500
+
+    data = request.get_json()
+
+    if not data:
+        app.logger.warning("Received empty or non-JSON payload.")
+        return jsonify({"error": "Invalid data: No valid JSON payload received"}), 400
+
+    app.logger.info(f"Received data payload: {data}")
+
+    inserted_id, river_name = process_sensor_data(data)
+    if inserted_id:
+        return jsonify({"message": "Data received and saved", "id": str(inserted_id), "assigned_river": river_name}), 200
+    else:
+        return jsonify({"error": "Failed to save data - check server logs"}), 500
 
 @app.route('/')
 def index():
