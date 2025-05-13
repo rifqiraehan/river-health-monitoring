@@ -6,6 +6,7 @@ import base64
 import google.generativeai as genai
 import json
 import hashlib
+from datetime import datetime
 
 MONGO_URI = "mongodb+srv://rifqiraehan86:NAGPGR8yKvVpLjsT@cluster0.lkusi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 DB_NAME = "SIC6"
@@ -24,6 +25,7 @@ except Exception as e:
     gemini_model = None
 
 def get_latest_image():
+    """Fetch the latest image and its timestamp from MongoDB."""
     try:
         latest_image = image_collection.find().sort("timestamp", DESCENDING).limit(1)
         image_docs = list(latest_image)
@@ -31,11 +33,12 @@ def get_latest_image():
             image_doc = image_docs[0]
             img_data = image_doc["image_data"]
             img = Image.open(io.BytesIO(img_data))
-            return img
-        return None
+            timestamp = image_doc["timestamp"]
+            return img, timestamp
+        return None, None
     except Exception as e:
         st.error(f"Error fetching image from MongoDB: {e}")
-        return None
+        return None, None
 
 def get_gemini_analysis(image_pil):
     if gemini_model is None:
@@ -100,7 +103,7 @@ def scale_to_text(scale):
 
 def main():
     st.markdown(
-        "<h2>Deteksi Sampah di Sungai (Analisis AI)</h2>",
+        "<h2>Deteksi Sampah di Sungai</h2>",
         unsafe_allow_html=True
     )
 
@@ -110,11 +113,12 @@ def main():
         st.session_state.cv_source = None
         st.session_state.analysis_result = None
         st.session_state.uploaded_file_hash = None
+        st.session_state.reload_requested = False
 
     st.sidebar.header("Sumber Gambar")
     source_option = st.sidebar.radio(
         "Pilih metode input gambar:",
-        ("Unggah Gambar", "Ambil dari ESP32-CAM"),
+        ("Ambil dari ESP32-CAM", "Unggah Gambar"),
         key="cv_source_option",
         index=0 if st.session_state.cv_source != "ESP32-CAM" else 1
     )
@@ -125,10 +129,10 @@ def main():
         st.session_state.analysis_result = None
         st.session_state.uploaded_file_hash = None
         st.session_state.cv_source = source_option
+        st.session_state.reload_requested = False
 
     image_input_pil = None
     caption = ""
-    run_analysis = False
 
     if source_option == "Unggah Gambar":
         uploaded_file = st.sidebar.file_uploader("Pilih file gambar:", type=["jpg", "jpeg", "png"], key="file_uploader")
@@ -143,7 +147,6 @@ def main():
                     st.session_state.cv_caption = caption
                     st.session_state.uploaded_file_hash = file_hash
                     st.session_state.analysis_result = None
-                    run_analysis = True
                 except Exception as e:
                     st.error(f"Error saat memproses file unggahan: {e}")
                     st.session_state.cv_image_pil = None
@@ -153,18 +156,24 @@ def main():
                 caption = st.session_state.cv_caption
 
     elif source_option == "Ambil dari ESP32-CAM":
-        if st.session_state.cv_image_pil is None:
-            with st.spinner("Mengambil gambar terbaru dari MongoDB..."):
-                image_input_pil = get_latest_image()
+        if st.session_state.reload_requested or st.session_state.cv_image_pil is None:
+            with st.spinner("Mengambil dan menganalisis gambar terbaru..."):
+                st.session_state.cv_image_pil = None
+                st.session_state.cv_caption = ""
+                st.session_state.analysis_result = None
+                image_input_pil, timestamp = get_latest_image()
                 if image_input_pil is not None:
-                    caption = "Gambar dari ESP32-CAM (Terbaru)"
+                    caption = f"Gambar dari ESP32-CAM (Terbaru, {timestamp.strftime('%Y-%m-%d %H:%M:%S')})"
                     st.session_state.cv_image_pil = image_input_pil
                     st.session_state.cv_caption = caption
-                    st.session_state.analysis_result = None
-                    run_analysis = True
+                    if gemini_model:
+                        is_valid, trash_scale, analysis_msg = get_gemini_analysis(image_input_pil)
+                        st.session_state.analysis_result = (is_valid, trash_scale, analysis_msg)
                 else:
                     caption = "Gagal mengambil gambar dari MongoDB"
                     st.session_state.cv_image_pil = None
+                    st.session_state.cv_caption = caption
+                st.session_state.reload_requested = False
         else:
             image_input_pil = st.session_state.cv_image_pil
             caption = st.session_state.cv_caption
@@ -173,72 +182,44 @@ def main():
 
     with col1:
         st.subheader("Gambar Input")
-        display_image = st.session_state.cv_image_pil
-        display_caption = st.session_state.cv_caption
-        if display_image:
-            st.image(display_image, caption=display_caption, use_container_width=True)
-            if source_option == "Ambil dari ESP32-CAM":
-                if st.button("Muat Ulang Gambar Terbaru", key="refresh_image"):
-                    with st.spinner("Mengambil gambar terbaru dari MongoDB..."):
-                        st.session_state.cv_image_pil = None
-                        st.session_state.cv_caption = ""
-                        st.session_state.analysis_result = None
-                        image_input_pil = get_latest_image()
-                        if image_input_pil is not None:
-                            caption = "Gambar dari ESP32-CAM (Terbaru)"
-                            st.session_state.cv_image_pil = image_input_pil
-                            st.session_state.cv_caption = caption
-                            run_analysis = True
-                        else:
-                            caption = "Gagal mengambil gambar dari MongoDB"
-                            st.session_state.cv_image_pil = None
-                            st.session_state.cv_caption = caption
+        image_placeholder = st.empty()
+        if st.session_state.cv_image_pil:
+            image_placeholder.image(st.session_state.cv_image_pil, caption=st.session_state.cv_caption, use_container_width=True)
         else:
-            st.info("Silakan pilih sumber gambar dan unggah atau ambil gambar.")
+            image_placeholder.info("Silakan pilih sumber gambar dan unggah atau ambil gambar.")
+        if source_option == "Ambil dari ESP32-CAM":
+            if st.button("Muat Ulang Gambar Terbaru", key="refresh_image"):
+                st.session_state.reload_requested = True
 
     with col2:
         st.subheader("Hasil Analisis AI")
-        result_text_placeholder = st.empty()
-        analyze_button_placeholder = st.empty()
-
+        analysis_placeholder = st.empty()
         if st.session_state.analysis_result:
             is_valid_cached, trash_scale_cached, _ = st.session_state.analysis_result
             if not is_valid_cached:
-                result_text_placeholder.error("Gambar tidak valid. AI mendeteksi ini bukan permukaan air sungai/danau.")
+                analysis_placeholder.error("Gambar tidak valid. AI mendeteksi ini bukan permukaan air sungai/danau.")
             elif trash_scale_cached != -1:
                 trash_text_cached = scale_to_text(trash_scale_cached)
-                result_text_placeholder.success(f"Estimasi Kepadatan Sampah: **{trash_text_cached}** (Skala AI: {trash_scale_cached}/100)")
+                analysis_placeholder.success(f"Estimasi Kepadatan Sampah: **{trash_text_cached}** (Skala AI: {trash_scale_cached}/100)")
             else:
-                result_text_placeholder.error("AI tidak dapat memberikan estimasi skala sampah.")
+                analysis_placeholder.error("AI tidak dapat memberikan estimasi skala sampah.")
+        elif st.session_state.cv_image_pil is None:
+            analysis_placeholder.info("Menunggu gambar untuk dianalisis.")
 
-        if image_input_pil is not None and run_analysis:
-            if gemini_model:
-                with st.spinner("Menganalisis gambar dengan AI Gemini..."):
-                    is_valid, trash_scale, analysis_msg = get_gemini_analysis(image_input_pil)
-                    st.session_state.analysis_result = (is_valid, trash_scale, analysis_msg)
-
-                if not is_valid:
-                    result_text_placeholder.error("Gambar tidak valid. AI mendeteksi ini bukan permukaan air sungai/danau.")
-                elif trash_scale != -1:
-                    trash_text = scale_to_text(trash_scale)
-                    result_text_placeholder.success(f"Estimasi Kepadatan Sampah: **{trash_text}** (Skala AI: {trash_scale}/100)")
-                else:
-                    result_text_placeholder.error(f"AI tidak dapat memberikan estimasi skala sampah. ({analysis_msg})")
-            else:
-                result_text_placeholder.error("Model AI Gemini tidak berhasil dimuat.")
-
-        elif source_option == "Ambil dari ESP32-CAM" and st.session_state.cv_image_pil is not None and not st.session_state.analysis_result:
-            if analyze_button_placeholder.button("Analisis dengan AI", key="analyze_esp32_image"):
+        if source_option == "Unggah Gambar" and st.session_state.cv_image_pil is not None and st.session_state.analysis_result is None:
+            with st.spinner("Menganalisis gambar yang diunggah..."):
                 if gemini_model:
-                    with st.spinner("Menganalisis gambar ESP32 dengan AI Gemini..."):
-                        is_valid, trash_scale, analysis_msg = get_gemini_analysis(st.session_state.cv_image_pil)
-                        st.session_state.analysis_result = (is_valid, trash_scale, analysis_msg)
-                        st.rerun()
+                    is_valid, trash_scale, analysis_msg = get_gemini_analysis(st.session_state.cv_image_pil)
+                    st.session_state.analysis_result = (is_valid, trash_scale, analysis_msg)
+                    if not is_valid:
+                        analysis_placeholder.error("Gambar tidak valid. AI mendeteksi ini bukan permukaan air sungai/danau.")
+                    elif trash_scale != -1:
+                        trash_text = scale_to_text(trash_scale)
+                        analysis_placeholder.success(f"Estimasi Kepadatan Sampah: **{trash_text}** (Skala AI: {trash_scale}/100)")
+                    else:
+                        analysis_placeholder.error(f"AI tidak dapat memberikan estimasi skala sampah. ({analysis_msg})")
                 else:
-                    result_text_placeholder.error("Model AI Gemini tidak berhasil dimuat.")
-
-        elif image_input_pil is None and not st.session_state.analysis_result:
-            result_text_placeholder.info("Menunggu gambar untuk dianalisis.")
+                    analysis_placeholder.error("Model AI Gemini tidak berhasil dimuat.")
 
 if __name__ == "__main__":
     main()
