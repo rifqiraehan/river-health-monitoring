@@ -50,7 +50,7 @@ def main():
 
     df_full = pd.DataFrame()
     df_graph_data = pd.DataFrame()
-    resample_freq = '30T'
+    resample_freq = '30min'
     graph_time_mode = '30 Menit (5 Jam Terakhir dari Data Terbaru)'
     fetch_start_datetime = None
     fetch_end_datetime = None
@@ -83,7 +83,7 @@ def main():
             st.sidebar.error("Tanggal Selesai tidak boleh sebelum Tanggal Mulai.")
             data_valid = False
         elif start_date_selected == end_date_selected:
-            resample_freq = '15T'
+            resample_freq = '15min'
             graph_time_mode = f'Per 15 Menit ({start_date_selected.strftime("%d %b %Y")})'
         else:
             resample_freq = 'D'
@@ -93,7 +93,7 @@ def main():
             latest_timestamp = latest_data['timestamp']
             fetch_end_datetime = latest_timestamp
             fetch_start_datetime = fetch_end_datetime - timedelta(hours=5)
-            resample_freq = '15T'
+            resample_freq = '15min'
             graph_time_mode = f'Per 15 Menit (5 Jam hingga {fetch_end_datetime.strftime("%d %b %Y, %H:%M")})'
         else:
             st.warning("Tidak ada data terbaru dalam database untuk grafik.")
@@ -278,8 +278,8 @@ def main():
 
         xaxis_title = "Waktu"
         if resample_freq == 'D': xaxis_title = "Tanggal"
-        elif resample_freq == '15T': xaxis_title = "Waktu (15 Menit)"
-        elif resample_freq == '30T': xaxis_title = "Waktu (30 Menit)"
+        elif resample_freq == '15min': xaxis_title = "Waktu (15 Menit)"
+        elif resample_freq == '30min': xaxis_title = "Waktu (30 Menit)"
 
         fig_rate_avg.update_layout(
             title=f'Grafik Laju Perubahan Ketinggian Air',
@@ -308,8 +308,8 @@ def main():
     if temp_trace_added or hum_trace_added:
         xaxis_title = "Waktu"
         if resample_freq == 'D': xaxis_title = "Tanggal"
-        elif resample_freq == '15T': xaxis_title = "Waktu (15 Menit)"
-        elif resample_freq == '30T': xaxis_title = "Waktu (30 Menit)"
+        elif resample_freq == '15min': xaxis_title = "Waktu (15 Menit)"
+        elif resample_freq == '30min': xaxis_title = "Waktu (30 Menit)"
 
         fig_temp_hum_avg.update_layout(
             title=f'Grafik Suhu & Kelembaban',
@@ -347,8 +347,8 @@ def main():
 
         xaxis_title = "Waktu"
         if resample_freq == 'D': xaxis_title = "Tanggal"
-        elif resample_freq == '15T': xaxis_title = "Waktu (15 Menit)"
-        elif resample_freq == '30T': xaxis_title = "Waktu (30 Menit)"
+        elif resample_freq == '15min': xaxis_title = "Waktu (15 Menit)"
+        elif resample_freq == '30min': xaxis_title = "Waktu (30 Menit)"
 
         fig_turbidity_avg.update_layout(
             title=f'Grafik Kekeruhan Air',
