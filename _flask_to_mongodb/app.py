@@ -1,23 +1,85 @@
 from flask import Flask, request, jsonify
 from pymongo import MongoClient, errors as pymongo_errors
+import paho.mqtt.client as mqtt
 from datetime import datetime
+import base64
+from io import BytesIO
+from PIL import Image
 import logging
 from math import radians, sin, cos, sqrt, atan2
 from bson import ObjectId
 
 app = Flask(__name__)
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(name)s:%(message)s')
 
-uri = "mongodb+srv://rifqiraehan86:NAGPGR8yKvVpLjsT@cluster0.lkusi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+MONGO_URI = "mongodb+srv://rifqiraehan86:NAGPGR8yKvVpLjsT@cluster0.lkusi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 DB_NAME = "SIC6"
-COLLECTION_NAME = "RiverMonitoring"
+MONITORING_COLLECTION_NAME = "RiverMonitoring"
 RIVER_COLLECTION_NAME = "River"
+IMAGE_COLLECTION_NAME = "CameraImages"
+
+MQTT_BROKER = "f6edeb4adb7c402ca7291dd7ef4d8fc5.s1.eu.hivemq.cloud"
+MQTT_PORT = 8883
+MQTT_USER = "hivemq.webclient.1747043871321"
+MQTT_PASS = "ab45PjNdISi;Bf9>2,G#"
+IMAGE_TOPIC = "starswechase/sungai/cv/camera/image_base64"
 
 client = None
 db = None
 monitoring_collection = None
 river_collection = None
+image_collection = None
+
+try:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000, connectTimeoutMS=20000, socketTimeoutMS=20000)
+    client.admin.command('ping')
+    logging.info("MongoDB connection successful!")
+    db = client[DB_NAME]
+    monitoring_collection = db[MONITORING_COLLECTION_NAME]
+    river_collection = db[RIVER_COLLECTION_NAME]
+    image_collection = db[IMAGE_COLLECTION_NAME]
+except pymongo_errors.ConnectionFailure as e:
+    logging.error(f"Could not connect to MongoDB: {e}", exc_info=True)
+except Exception as e:
+    logging.error(f"An unexpected error occurred during MongoDB setup: {e}", exc_info=True)
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        logging.info("Connected to MQTT broker")
+        client.subscribe(IMAGE_TOPIC)
+    else:
+        logging.error(f"Failed to connect to MQTT broker, return code {rc}")
+
+def on_message(client, userdata, msg):
+    try:
+        logging.info(f"Received message on {msg.topic}")
+        encoded_image = msg.payload.decode('utf-8')
+        img_data = base64.b64decode(encoded_image)
+        img = Image.open(BytesIO(img_data))
+
+        image_doc = {
+            "timestamp": datetime.now(),
+            "river_id": "",
+            "image_data": img_data,
+            "format": img.format,
+            "size": img.size
+        }
+        image_collection.insert_one(image_doc)
+        logging.info("Image saved to MongoDB")
+    except Exception as e:
+        logging.error(f"Error processing MQTT message: {e}")
+
+mqtt_client = mqtt.Client()
+mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
+mqtt_client.tls_set()
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
+
+try:
+    mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    mqtt_client.loop_start()
+except Exception as e:
+    logging.error(f"Failed to connect to MQTT broker: {e}")
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
@@ -33,18 +95,6 @@ def haversine(lat1, lon1, lat2, lon2):
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     distance = R * c * 1000
     return distance
-
-try:
-    client = MongoClient(uri, serverSelectionTimeoutMS=10000, connectTimeoutMS=20000, socketTimeoutMS=20000, appName='FlaskSensorReceiver')
-    client.admin.command('ping')
-    app.logger.info("MongoDB connection successful!")
-    db = client[DB_NAME]
-    monitoring_collection = db[COLLECTION_NAME]
-    river_collection = db[RIVER_COLLECTION_NAME]
-except pymongo_errors.ConnectionFailure as e:
-    app.logger.error(f"Could not connect to MongoDB: {e}", exc_info=True)
-except Exception as e:
-    app.logger.error(f"An unexpected error occurred during MongoDB setup: {e}", exc_info=True)
 
 @app.route("/sensor", methods=["POST"])
 def receive_sensor_data():
@@ -82,7 +132,6 @@ def receive_sensor_data():
         elif delta_per_min_raw is None:
              app.logger.warning(f"delta_per_min is None, but status is '{received_status}'. Keeping received status.")
 
-
         sensor_latitude = None
         sensor_longitude = None
         turbidity_voltage = None
@@ -96,7 +145,6 @@ def receive_sensor_data():
         if turbidity_voltage_raw is not None:
             try: turbidity_voltage = float(turbidity_voltage_raw)
             except (ValueError, TypeError): app.logger.warning(f"Invalid turbidity_voltage value, cannot convert to float: {turbidity_voltage_raw}")
-
 
         closest_river_id = None
         assigned_river_name = "N/A"
@@ -136,7 +184,6 @@ def receive_sensor_data():
             except Exception as default_e:
                 app.logger.error(f"Error finding default river: {default_e}", exc_info=True)
 
-
         sensor_data = {
             "timestamp": datetime.now(),
             "distance": data.get("distance"),
@@ -154,7 +201,6 @@ def receive_sensor_data():
             "sungai_id": closest_river_id
         }
 
-
         sensor_data_cleaned = {k: v for k, v in sensor_data.items() if v is not None}
 
         insert_result = monitoring_collection.insert_one(sensor_data_cleaned)
@@ -171,5 +217,9 @@ def receive_sensor_data():
         app.logger.error(f"Error processing request: {e}", exc_info=True)
         return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500
 
+@app.route('/')
+def index():
+    return "Flask MQTT Subscriber and Sensor Receiver is running"
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5001, debug=False)
