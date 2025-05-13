@@ -1,13 +1,19 @@
 import streamlit as st
 from PIL import Image
 import io
+from pymongo import MongoClient, DESCENDING
 import base64
 import google.generativeai as genai
-import numpy as np
-import requests
-import time
 import json
 import hashlib
+
+MONGO_URI = "mongodb+srv://rifqiraehan86:NAGPGR8yKvVpLjsT@cluster0.lkusi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+DB_NAME = "SIC6"
+IMAGE_COLLECTION = "CameraImages"
+
+client = MongoClient(MONGO_URI)
+db = client[DB_NAME]
+image_collection = db[IMAGE_COLLECTION]
 
 try:
     api_key = st.secrets["GOOGLE_API_KEY"]
@@ -17,23 +23,18 @@ except Exception as e:
     st.error(f"Gagal mengkonfigurasi atau memuat model: {e}")
     gemini_model = None
 
-ESP32_CAPTURE_URL = "http://192.168.75.206/capture"
-
-def capture_image_from_esp32(url):
+def get_latest_image():
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
-        img_pil = Image.open(io.BytesIO(response.content))
-        if img_pil is None:
-            st.error("⚠️ Gagal decode gambar dari ESP32-CAM menggunakan PIL.")
-            return None
-        return img_pil
-    except requests.exceptions.RequestException as e:
-        st.error(f"⚠️ Maaf, Kamera ESP32-CAM sedang tidak aktif.")
+        latest_image = image_collection.find().sort("timestamp", DESCENDING).limit(1)
+        image_docs = list(latest_image)
+        if len(image_docs) > 0:
+            image_doc = image_docs[0]
+            img_data = image_doc["image_data"]
+            img = Image.open(io.BytesIO(img_data))
+            return img
         return None
     except Exception as e:
-        st.error(f"⚠️ Terjadi kesalahan saat mengambil atau memproses gambar ESP32: {e}")
+        st.error(f"Error fetching image from MongoDB: {e}")
         return None
 
 def get_gemini_analysis(image_pil):
@@ -132,7 +133,6 @@ def main():
     if source_option == "Unggah Gambar":
         uploaded_file = st.sidebar.file_uploader("Pilih file gambar:", type=["jpg", "jpeg", "png"], key="file_uploader")
         if uploaded_file is not None:
-            # Gunakan hash konten file untuk mendeteksi perubahan
             file_bytes = uploaded_file.getvalue()
             file_hash = hashlib.sha256(file_bytes).hexdigest()
             if st.session_state.get('uploaded_file_hash') != file_hash:
@@ -154,17 +154,16 @@ def main():
 
     elif source_option == "Ambil dari ESP32-CAM":
         if st.session_state.cv_image_pil is None:
-            with st.spinner(f"Mengambil gambar dari ESP32-CAM..."):
-                image_input_pil = capture_image_from_esp32(ESP32_CAPTURE_URL)
+            with st.spinner("Mengambil gambar terbaru dari MongoDB..."):
+                image_input_pil = get_latest_image()
                 if image_input_pil is not None:
-                    caption = "Gambar dari ESP32-CAM"
+                    caption = "Gambar dari ESP32-CAM (Terbaru)"
                     st.session_state.cv_image_pil = image_input_pil
                     st.session_state.cv_caption = caption
-                    st.session_state.uploaded_file_hash = None
                     st.session_state.analysis_result = None
                     run_analysis = True
                 else:
-                    caption = "Gagal mengambil gambar dari ESP32-CAM"
+                    caption = "Gagal mengambil gambar dari MongoDB"
                     st.session_state.cv_image_pil = None
         else:
             image_input_pil = st.session_state.cv_image_pil
@@ -178,6 +177,22 @@ def main():
         display_caption = st.session_state.cv_caption
         if display_image:
             st.image(display_image, caption=display_caption, use_container_width=True)
+            if source_option == "Ambil dari ESP32-CAM":
+                if st.button("Muat Ulang Gambar Terbaru", key="refresh_image"):
+                    with st.spinner("Mengambil gambar terbaru dari MongoDB..."):
+                        st.session_state.cv_image_pil = None
+                        st.session_state.cv_caption = ""
+                        st.session_state.analysis_result = None
+                        image_input_pil = get_latest_image()
+                        if image_input_pil is not None:
+                            caption = "Gambar dari ESP32-CAM (Terbaru)"
+                            st.session_state.cv_image_pil = image_input_pil
+                            st.session_state.cv_caption = caption
+                            run_analysis = True
+                        else:
+                            caption = "Gagal mengambil gambar dari MongoDB"
+                            st.session_state.cv_image_pil = None
+                            st.session_state.cv_caption = caption
         else:
             st.info("Silakan pilih sumber gambar dan unggah atau ambil gambar.")
 
