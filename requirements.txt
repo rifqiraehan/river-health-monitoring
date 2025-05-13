@@ -9,3 +9,4 @@ streamlit-authenticator
 bcrypt
 streamlit_geolocation
 geopy
+paho-mqtt
