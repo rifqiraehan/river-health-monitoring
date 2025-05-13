@@ -235,17 +235,18 @@ def main():
 
                     df_full.sort_index(inplace=True)
 
-                    cols_to_average = [col for col in ['delta_per_min', 'temperature', 'humidity', 'turbidity_voltage'] if col in df_full.columns and not df_full[col].isnull().all()]
+                    numeric_df = df_full.select_dtypes(include=['float64', 'int64'])
 
-                    if cols_to_average:
-                        df_to_resample = df_full[
-                            (df_full.index >= fetch_start_datetime) &
-                            (df_full.index <= fetch_end_datetime)
+                    if not numeric_df.empty:
+                        df_to_resample = numeric_df[
+                            (numeric_df.index >= fetch_start_datetime) &
+                            (numeric_df.index <= fetch_end_datetime)
                         ]
 
                         if not df_to_resample.empty:
+                            df_to_resample = df_to_resample.infer_objects(copy=False)
                             df_to_resample = df_to_resample.interpolate(method='time', limit_direction='both')
-                            df_graph_data = df_to_resample[cols_to_average].resample(resample_freq).mean().dropna(how='all')
+                            df_graph_data = df_to_resample.resample(resample_freq).mean().dropna(how='all')
                         else:
                             df_graph_data = pd.DataFrame()
                             st.warning("Tidak ada data dalam rentang waktu yang dipilih untuk grafik.")
