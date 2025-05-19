@@ -8,8 +8,8 @@ import ujson
 import sys
 from umqtt.simple import MQTTClient
 
-WIFI_SSID = "Galaxy"
-WIFI_PASSWORD = "Alfarrel"
+WIFI_SSID = "Yoru no Hajimarisa"
+WIFI_PASSWORD = "bunnygirl"
 
 MQTT_BROKER = "f6edeb4adb7c402ca7291dd7ef4d8fc5.s1.eu.hivemq.cloud"
 MQTT_PORT = 8883

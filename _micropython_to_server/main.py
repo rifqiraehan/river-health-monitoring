@@ -8,8 +8,8 @@ import urequests
 import ujson
 import sys
 
-WIFI_SSID = "Galaxy"
-WIFI_PASSWORD = "Alfarrel"
+WIFI_SSID = "Yoru no Hajimarisa"
+WIFI_PASSWORD = "bunnygirl"
 SERVER_URL = "http://192.168.75.169:5000/sensor"
 BUFFER_SIZE = 5
 TURBIDITY_CLEAR_THRESHOLD_V = 2.5
